@@ -867,6 +867,15 @@ button,a,.opt,.hc{-webkit-tap-highlight-color:transparent}
 .qc.full .qbar i{background:var(--ok)}
 .qc.full:not(.pri) .qic{background:var(--ok-bg);color:var(--ok)}
 .chr .ck{color:var(--ok);font-weight:800;margin-right:6px}
+/* Continue button beside unfinished sessions */
+.srw-w{display:flex;align-items:stretch}
+.srw-w .srw{flex:1;min-width:0}
+.srw-w+.srw,.srw+.srw-w,.srw-w+.srw-w{border-top:1px solid var(--line-2)}
+.srw-go{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;min-width:88px;padding:0 12px;
+  border:none;border-left:1px solid var(--line-2);background:var(--accent-soft);color:var(--accent);font-size:13px;font-weight:700}
+.srw-go small{font-size:11px;font-weight:550;color:color-mix(in srgb,var(--accent) 75%,var(--muted))}
+.srw-go:hover{background:color-mix(in srgb,var(--accent) 18%,transparent)}
+@media(max-width:600px){.srw-go{min-width:74px;padding:0 8px}}
 </style>
 </head>
 <body>
@@ -1666,10 +1675,12 @@ function archiveSession(){
 }
 let _ckT=0;
 function saveCheckpoint(force){
-  if(!sessId||!deck.length||pos>=deck.length)return; // finished sets are archived, not resumable
+  if(!sessId||!deck.length)return;
+  // on the results screen the set stays resumable from its first unanswered question; fully answered sets are not saved
+  const p=pos<deck.length?pos:S.findIndex(s=>!s.scored);if(p<0)return;
   const now=Date.now();if(!force&&now-_ckT<1500)return;_ckT=now;
   LS_set('mdcu_cur',JSON.stringify({v:1,id:sessId,start:sessStart,at:now,title:sessTitle,sub:sessSub,mode:examMode,
-    pos,sec:sessSec,run,rw:roundWrong,ids:deck.map(c=>c.id),S:S.map(s=>Object.assign({},s,{open:{}}))}));
+    pos:p,sec:sessSec,run,rw:roundWrong,ids:deck.map(c=>c.id),S:S.map(s=>Object.assign({},s,{open:{}}))}));
 }
 function clearCheckpoint(){try{localStorage.removeItem('mdcu_cur')}catch(e){}}
 const ckPairs=j=>j&&j.ids?j.ids.map((id,i)=>[Q.find(c=>c.id===id),j.S[i]]).filter(p=>p[0]&&p[1]&&p[1].ord&&p[1].ord.length===p[0].o.length):[];
@@ -1855,7 +1866,7 @@ function render(){
     w.innerHTML='<div class="empty"><h2>No questions here</h2><p>Try different filters</p><button class="btn primary" id="emNew" style="margin-top:14px">＋ New set</button></div>';
     $('emNew').onclick=()=>openSheet('newScrim');return;
   }
-  if(pos>=deck.length){ftr.classList.add('hide');archiveSession();clearCheckpoint();renderResult();return}
+  if(pos>=deck.length){ftr.classList.add('hide');archiveSession();if(S.every(s=>s.scored))clearCheckpoint();else saveCheckpoint(true);renderResult();return}
   saveCheckpoint();
   ftr.classList.remove('hide');
 
@@ -2051,10 +2062,34 @@ function barChart(items,o){
 const statBar=(o,x,total)=>'<span class="cbar"><i class="o" style="width:'+pct(o,total)+'%"></i><i class="x" style="width:'+pct(x,total)+'%"></i></span>';
 function sessRow(h,live){
   const p=pct(h.c,h.ans);
-  return '<button class="srw" data-sess="'+h.id+'"><span class="sd">'+fmtDate(h.start)+'</span>'
+  const row='<button class="srw" data-sess="'+h.id+'"><span class="sd">'+fmtDate(h.start)+'</span>'
     +'<span class="stt">'+E(h.title||'Practice set')+(live?' <em class="live">In progress</em>':(h.done?'':' <em>Unfinished</em>'))+'</span>'
     +'<span class="sx">'+h.c+'/'+h.ans+(h.ans<h.n?' <small>of '+h.n+'</small>':'')+'</span>'
     +'<span class="sp '+accCls(h.ans?h.c/h.ans:null,h.ans)+'">'+(h.ans?p+'%':'—')+'</span><span class="sdur">'+fmtDur(h.dur)+'</span></button>';
+  const left=sessLeft(h);
+  return left?'<div class="srw-w">'+row+'<button class="srw-go" data-cont="'+h.id+'" title="Continue this set" aria-label="Continue this set, '+left+' left">Continue<small>'+left+' left</small></button></div>':row;
+}
+/* unanswered questions still in the bank for a session record; 0 when finished or already continued */
+function sessLeft(h){
+  if(!h||h.done||h.cont)return 0;
+  if(sessId===h.id&&deck.length)return S.filter(s=>!s.scored).length;
+  const ck=readCheckpoint(),j=ck&&ck.j.id===h.id?ck.j:PARKED.find(p=>p.id===h.id);
+  if(j){const pr=ckPairs(j);return pr.filter(p=>!p[1].scored).length}
+  return (h.items||[]).filter(x=>x[1]<0&&Q.some(c=>c.id===x[0])).length;
+}
+/* pick a session up again: the live set, the saved checkpoint, a parked set, or, when its saved state is gone,
+   a new set of the questions it never answered */
+function continueSession(id){
+  const h=HIST.find(x=>x.id===id);
+  if(sessId===id&&deck.length){const i=S.findIndex(s=>!s.scored);if(i>=0){go(pos<deck.length&&!S[pos].scored?pos:i);return}}
+  const ck=readCheckpoint();
+  if(ck&&ck.j.id===id){resumeCheckpoint();return}
+  if(PARKED.some(p=>p.id===id)){resumeParked(id);return}
+  if(!h)return;
+  const rest=h.items.filter(x=>x[1]<0).map(x=>Q.find(c=>c.id===x[0])).filter(Boolean);
+  if(!rest.length){toast('Nothing left in this set');return}
+  startDeck(rest,h.title||'Practice set','Rest of '+fmtDate(h.start)+' · '+rest.length+' left',h.mode);
+  h.cont=sessId;saveHist();
 }
 
 /* ---- chapter heatmap ---- */
@@ -2191,6 +2226,7 @@ function renderHome(){
   $('wrap').querySelectorAll('[data-rec]').forEach(b=>b.onclick=()=>recs[+b.dataset.rec].run());
   $('wrap').querySelectorAll('[data-ch]').forEach(b=>b.onclick=()=>startChapter(CHAPS[+b.dataset.ch],true));
   $('wrap').querySelectorAll('[data-sess]').forEach(b=>b.onclick=()=>openStats('sess',+b.dataset.sess));
+  $('wrap').querySelectorAll('[data-cont]').forEach(b=>b.onclick=()=>continueSession(+b.dataset.cont));
 }
 
 /* ---- results (end of a set) ---- */
@@ -2285,8 +2321,9 @@ function sessDetailHTML(r,o){
     +it.map(x=>'<button class="ql" data-qi="'+x.i+'"><span class="n">'+(x.i+1)+'</span><span class="st '+(x.ok===1?'o':x.ok===0?'x':'e')+'">'+(x.ok===1?'✓':x.ok===0?'✕':'')+'</span>'
       +'<span class="tx">'+E(trunc(x.q.q,90))+'</span><span class="mt">'+(x.hint?'💡 ':'')+fmtSec(x.sec)+'</span></button>').join('')+'</div></div>';
   if(!o.btns){
-    const wr=it.filter(x=>x.ok===0).length;
-    h+='<div class="rbtns">'+(wr?'<button class="btn primary" id="sdWrong">Review '+wr+' mistakes</button>':'')+'<button class="btn" id="sdAgain">Redo this set</button></div>';
+    const wr=it.filter(x=>x.ok===0).length,left=sessLeft(r);
+    h+='<div class="rbtns">'+(left?'<button class="btn primary" id="sdCont">Continue · '+left+' left →</button>':'')
+      +(wr?'<button class="btn'+(left?'':' primary')+'" id="sdWrong">Review '+wr+' mistakes</button>':'')+'<button class="btn" id="sdAgain">Redo this set</button></div>';
   }
   return h+'</div>';
 }
@@ -2296,6 +2333,7 @@ function wireSessDetail(r){
   $('wrap').querySelectorAll('[data-qi]').forEach(b=>b.onclick=()=>again(+b.dataset.qi));
   const w=$('sdWrong');if(w)w.onclick=()=>startDeck(r.items.filter(x=>x[1]===0).map(x=>Q.find(c=>c.id===x[0])).filter(Boolean),'Review mistakes',r.title||'');
   const a=$('sdAgain');if(a)a.onclick=()=>again(0);
+  const ct=$('sdCont');if(ct)ct.onclick=()=>continueSession(r.id);
   const b=$('sdBack');if(b)b.onclick=()=>{sessSel=null;render();scrollTop()};
 }
 
@@ -2325,6 +2363,7 @@ function renderStats(){
   $('stClose').onclick=showStats;
   $('wrap').querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{statTab=b.dataset.tab;render()});
   $('wrap').querySelectorAll('[data-sess]').forEach(b=>b.onclick=()=>{sessSel=+b.dataset.sess;render();scrollTop()});
+  $('wrap').querySelectorAll('[data-cont]').forEach(b=>b.onclick=()=>continueSession(+b.dataset.cont));
   $('wrap').querySelectorAll('[data-ch]').forEach(b=>b.onclick=()=>startChapter(CHAPS[+b.dataset.ch]));
   const mm=$('stMissed');if(mm)mm.onclick=()=>startDeck(missedList().map(x=>x.q),'Most missed','From all history');
   const sp=$('stPool');if(sp)sp.onclick=retryPool;
