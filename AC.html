@@ -30,7 +30,7 @@ How to rebuild data.js from the user's .md banks
   embedded below as <script type="text/plain" id="bank-parser-v3">. Same usage as parser2 (OUTFILE=v3.txt).
 
 User progress is safe across bank swaps
-  reconcileBank() fingerprints each question (stem + choices + answer). Unchanged questions keep
+  reconcileBank() fingerprints each question (choices + answer, not the stem). Unchanged or reworded questions keep
   their history even if their id shifted. Edited ones are reset. The resume checkpoint is remapped.
   No code change is needed for this.
 
@@ -844,6 +844,29 @@ button,a,.opt,.hc{-webkit-tap-highlight-color:transparent}
 .fc-f{-webkit-transform:rotateY(0deg);transform:rotateY(0deg)}
 .fc-f,.fc-b{transition:visibility 0s .2s}
 .fc.flip .fc-f,.fc:not(.flip) .fc-b{visibility:hidden}
+/* ===== unfinished sets list + done-state on set tiles and chapters ===== */
+.parked{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:12px;background:var(--surface);overflow:hidden;margin-bottom:6px}
+.pk{display:flex;align-items:stretch}
+.pk+.pk{border-top:1px solid var(--line-2)}
+.pk-go{flex:1;min-width:0;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:14px;row-gap:6px;padding:11px 15px;
+  border:none;background:transparent;text-align:left;color:var(--ink)}
+.pk-go:hover{background:var(--surface-sunk)}
+.pk-t{font-size:14px;font-weight:650;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pk-t small{display:block;font-size:12px;font-weight:500;color:var(--muted);overflow:hidden;text-overflow:ellipsis}
+.pk-m{font-size:12px;color:var(--ink-2);font-variant-numeric:tabular-nums;white-space:nowrap}
+.pk-go .rs-bar{grid-column:1/-1;margin-top:0;height:4px}
+.pk-x{flex:0 0 44px;border:none;border-left:1px solid var(--line-2);background:transparent;color:var(--faint);font-size:13px}
+.pk-x:hover{color:var(--no);background:var(--no-bg)}
+@media(max-width:600px){.pk-go{grid-template-columns:minmax(0,1fr)}.pk-m{white-space:normal}}
+.qc .qbadge{display:inline-block;margin-left:7px;padding:1px 7px;border-radius:9px;font-size:11px;font-weight:650;vertical-align:1px;
+  background:var(--accent-soft);color:var(--accent)}
+.qc.pri .qbadge{background:rgba(255,255,255,.22);color:var(--accent-ink)}
+.qc .qbar{display:block;height:3px;border-radius:2px;margin-top:5px;background:var(--surface-sunk);overflow:hidden}
+.qc .qbar i{display:block;height:100%;border-radius:2px;background:var(--accent);transition:width .4s}
+.qc.pri .qbar{background:rgba(255,255,255,.25)}.qc.pri .qbar i{background:var(--accent-ink)}
+.qc.full .qbar i{background:var(--ok)}
+.qc.full:not(.pri) .qic{background:var(--ok-bg);color:var(--ok)}
+.chr .ck{color:var(--ok);font-weight:800;margin-right:6px}
 </style>
 </head>
 <body>
@@ -1443,34 +1466,58 @@ const saveAtt=()=>LS_set('mdcu_att',JSON.stringify(ATT));
 /* finished / abandoned sessions */
 let HIST=[];try{HIST=JSON.parse(localStorage.getItem('mdcu_hist'))||[]}catch(e){}
 const saveHist=()=>{HIST=HIST.slice(-60);LS_set('mdcu_hist',JSON.stringify(HIST))};
+/* parked sets: starting another set moves the unfinished one here (same shape as mdcu_cur), newest first */
+let PARKED=[];try{PARKED=JSON.parse(localStorage.getItem('mdcu_parked'))||[]}catch(e){}
+const saveParked=()=>{PARKED=PARKED.sort((a,b)=>(b.at||b.id)-(a.at||a.id)).slice(0,12);LS_set('mdcu_parked',JSON.stringify(PARKED))};
 /* attempts for one question, falling back to the legacy last-result map */
 const attOf=id=>ATT[id]&&ATT[id].length?ATT[id]:(st[id]?[[0,st[id]==='o'?1:0,null,0]]:[]);
 /* question-bank fingerprint: when data.js is replaced, keep history for questions whose
-   stem/choices/answer are unchanged (even if their id moved), drop it for edited ones */
+   choices and answer are unchanged (even if their id moved or the stem was reworded), drop it for edited ones */
 (function reconcileBank(){
   const hs=s=>{let h=5381;for(let i=0;i<s.length;i++)h=(h*33^s.charCodeAt(i))>>>0;return h.toString(36)};
-  // v2 ignores choice order (the app shuffles choices anyway); v1 kept so older saved maps still match
+  // v3 (saved now): choices + answer only, so rewording a stem keeps history. v2 / v1 include the stem; kept so older saved maps still match
   const fp1=c=>hs(c.q+'\u0001'+c.o.join('\u0002')+'\u0001'+c.k.join(','));
-  const fp=c=>'2:'+hs(c.q+'\u0001'+c.o.slice().sort().join('\u0002')+'\u0001'+c.k.map(i=>c.o[i]).sort().join('\u0002'));
+  const fp2=c=>'2:'+hs(c.q+'\u0001'+c.o.slice().sort().join('\u0002')+'\u0001'+c.k.map(i=>c.o[i]).sort().join('\u0002'));
+  const fp=c=>'3:'+hs(c.o.slice().sort().join('\u0002')+'\u0001'+c.k.map(i=>c.o[i]).sort().join('\u0002'));
   // Nov 2026 Trauma + Emergency + Ambulatory banks: these ids only had their choices reordered (same stem, same choices, same answer)
   const KEEP=new Set('TR01,TR03,TR06,TR08,TR11,TR12,TR13,TR16,TR20,TR21,TR24,TR27,TR28,TR30,TR37,TR39,TR45,TR47,TR49,TR50,TR52,TR53,TR54,TR55,TR57,TR59,TR60,TR62,TR63,TR65,TR66,TR69,TR70,TR71,TR75,TR76,TR77,TR78,TR82,TR83,TR84,TR85,TR88,TR91,TR92,TR93,TR96,TR97,TR99,TR103,TR104,TR105,TR107,TR112,TR114,ER03,ER11,ER12,ER17,ER18,ER20,ER26,ER30,ER35,ER37,ER39,ER43,ER45,ER46,ER51,ER57,ER58,ER60,ER61,ER65,ER71,ER72,ER73,ER76,ER77,AF001,AF004,AF005,AF011,AF013,AF018,AF023,AF034,AF046,AF049,AF052,AF062,AF063,AF064,AF066,AF067,AF084,AF088,AF091,AF100,AF105,AF108,AF115,AF120,AF121'.split(','));
-  const cur={},byFp={};Q.forEach(c=>{const f=fp(c),g=fp1(c);cur[c.id]=f;if(!(f in byFp))byFp[f]=c.id;if(!(g in byFp))byFp[g]=c.id});
+  // Nov 25 2026 (15:39+) re-edit of all four banks: these ids only had their stem reworded (same choices in the same order, same answer)
+  const STEMONLY=new Set('TR01,TR04,TR05,TR08,TR09,TR10,TR11,TR13,TR14,TR20,TR22,TR23,TR25,TR26,TR28,TR31,TR33,TR37,TR41,TR42,TR43,TR48,TR51,TR54,TR56,TR61,TR62,TR63,TR64,TR65,TR69,TR76,TR80,TR81,TR83,TR85,TR89,TR91,TR95,TR98,TR100,TR101,TR103,TR105,TR107,TR117,ER01,ER02,ER03,ER07,ER08,ER12,ER13,ER15,ER16,ER17,ER18,ER19,ER21,ER22,ER23,ER24,ER28,ER29,ER36,ER40,ER43,ER46,ER49,ER50,ER52,ER58,ER62,ER64,ER66,ER71,ER73,ER75,ER76,ER79,ER85,ER90,ER92,AF006,AF008,AF009,AF011,AF013,AF015,AF017,AF025,AF028,AF029,AF030,AF032,AF033,AF037,AF042,AF043,AF044,AF046,AF051,AF054,AF055,AF057,AF059,AF062,AF063,AF068,AF069,AF072,AF073,AF075,AF076,AF081,AF082,AF084,AF085,AF089,AF091,AF092,AF095,AF097,AF098,AF102,AF103,AF104,AF107,AF110,AF112,AF114,AF116,AF120,AF121,AF122,AF123,AF127,CP001,CP002,CP004,CP005,CP007,CP008,CP009,CP010,CP012,CP015,CP016,CP017,CP018,CP019,CP020,CP023,CP024,CP025,CP026,CP027,CP028,CP029,CP030,CP031,CP033,CP034,CP035,CP036,CP037,CP038,CP039,CP040,CP041,CP042,CP043,CP045,CP046,CP047,CP048,CP049,CP050,CP052,CP053,CP054,CP055,CP056,CP059,CP060,CP063,CP064,CP065,CP066,CP067,CP068,CP070,CP071,CP072,CP073,CP074,CP075,CP076,CP078,CP079,CP080,CP081,CP082,CP083,CP084,CP085,CP086,CP087,CP088,CP089,CP090,CP092,CP093,CP096,CP106,CP107,CP108'.split(','));
+  const cur={},byFp={};Q.forEach(c=>{const f=fp(c);cur[c.id]=f;[f,fp2(c),fp1(c)].forEach(g=>{if(!(g in byFp))byFp[g]=c.id})});
   let old=null;try{old=JSON.parse(localStorage.getItem('mdcu_fp'))}catch(e){}
   if(!Q.length)return; // empty / failed bank load: never touch history
   LS_set('mdcu_fp',JSON.stringify(cur));
+  // one-time repair: the Nov 25 re-edit reset STEMONLY questions before stem rewording was allowed. Their answers
+  // survive in session history as '~id' items, so rebuild attempts + last result from sessions since that bank (Nov 25 13:00 ICT)
+  if(!LS_get('mdcu_fix_stem1',null)){
+    const CUT=1795586400000,add={};let nq=0;
+    HIST.forEach(h=>{const t0=h.start||h.id;if(!t0||t0<CUT)return;
+      (h.items||[]).forEach((x,i)=>{const s=String(x[0]);if(s[0]!=='~')return;const id=s.slice(1);
+        if(!STEMONLY.has(id)||!cur[id])return;x[0]=id;if(x[1]>=0)(add[id]=add[id]||[]).push([t0+i*1000,x[1],x[2]==null?null:x[2],x[3]||0])})});
+    Object.keys(add).forEach(id=>{
+      const all=(ATT[id]||[]).concat(add[id]).sort((a,b)=>a[0]-b[0]).slice(-12);ATT[id]=all;
+      st[id]=all[all.length-1][1]?'o':'x';nq++});
+    if(nq){save();saveAtt();saveHist();window._fixMsg='Restored history for '+nq+' reworded question'+(nq>1?'s':'')}
+    LS_set('mdcu_fix_stem1','1');
+  }
   if(!old)return;
   const map={};let moved=0,gone=0;
   const reord=new Set(); // matched only via KEEP: saved per-question choice order no longer fits
-  Object.keys(old).forEach(id=>{let n=byFp[old[id]];if(!n&&KEEP.has(id)&&cur[id]&&String(old[id]).slice(0,2)!=='2:'){n=id;reord.add(id)}if(n){map[id]=n;if(n!==id)moved++}else{map[id]=null;gone++}});
+  Object.keys(old).forEach(id=>{const o=String(old[id]);
+    let n=cur[id]===o?id:byFp[o]; // same id first: two questions can share the same choices
+    if(!n&&STEMONLY.has(id)&&cur[id]&&o.slice(0,2)==='2:')n=id;
+    if(!n&&KEEP.has(id)&&cur[id]&&!/^[23]:/.test(o)){n=id;reord.add(id)}
+    if(n){map[id]=n;if(n!==id)moved++}else{map[id]=null;gone++}});
   if(!moved&&!gone&&!reord.size)return;
   const re=o=>{const r={};Object.keys(o).forEach(id=>{const n=id in map?map[id]:(cur[id]?id:null);if(n)r[n]=o[id]});return r};
   st=re(st);save();ATT=re(ATT);saveAtt();flags=re(flags);saveFlags();
   HIST.forEach(h=>(h.items||[]).forEach(x=>{if(x[0] in map)x[0]=map[x[0]]||('~'+x[0])}));saveHist();
+  const fixCk=j=>{const keep=j.ids.map((id,i)=>[id in map?map[id]:id,j.S[i]]).filter((p,i)=>p[0]&&cur[p[0]]&&!reord.has(j.ids[i]));
+    if(!keep.length)return null;j.pos=Math.min(j.pos||0,keep.length);j.ids=keep.map(p=>p[0]);j.S=keep.map(p=>p[1]);return j};
   try{const j=JSON.parse(localStorage.getItem('mdcu_cur'));
-    if(j&&j.ids){const keep=j.ids.map((id,i)=>[id in map?map[id]:id,j.S[i]]).filter((p,i)=>p[0]&&cur[p[0]]&&!reord.has(j.ids[i]));
-      if(!keep.length)localStorage.removeItem('mdcu_cur');
-      else{j.pos=Math.min(j.pos||0,keep.length);j.ids=keep.map(p=>p[0]);j.S=keep.map(p=>p[1]);LS_set('mdcu_cur',JSON.stringify(j))}}
+    if(j&&j.ids){const f=fixCk(j);if(!f)localStorage.removeItem('mdcu_cur');else LS_set('mdcu_cur',JSON.stringify(f))}
   }catch(e){}
+  try{PARKED=PARKED.filter(j=>j&&j.ids).map(fixCk).filter(Boolean);saveParked()}catch(e){}
   window._bankMsg=gone?'Question bank updated · '+gone+' edited question'+(gone>1?'s':'')+' reset':'';
 })();
 /* inline LaTeX in the banks ($\ge 9.0\%$, $\text{HCO}_3^-$) shown as plain symbols; runs after the
@@ -1596,7 +1643,8 @@ function fillCh(){
   $('poolNote').textContent=pooled().length+' questions match'+(pool?' · '+pool+' to review':'');
 }
 function startDeck(list,title,subtitle,mode){
-  if(sessId)archiveSession();else discardCheckpoint();
+  if(sessId){archiveSession();if(pos<deck.length)saveCheckpoint(true)}
+  parkCheckpoint();
   deck=list;S=deck.map(mkState);pos=0;examMode=mode||false;view='quiz';
   run={n:0,c:0};roundWrong=[];chapStreak={};sessSec=0;
   sessTitle=title;sessSub=subtitle||'';sessId=Date.now();sessStart=sessId;
@@ -1618,16 +1666,17 @@ function archiveSession(){
 }
 let _ckT=0;
 function saveCheckpoint(force){
-  if(!sessId||!deck.length)return;
+  if(!sessId||!deck.length||pos>=deck.length)return; // finished sets are archived, not resumable
   const now=Date.now();if(!force&&now-_ckT<1500)return;_ckT=now;
-  LS_set('mdcu_cur',JSON.stringify({v:1,id:sessId,start:sessStart,title:sessTitle,sub:sessSub,mode:examMode,
+  LS_set('mdcu_cur',JSON.stringify({v:1,id:sessId,start:sessStart,at:now,title:sessTitle,sub:sessSub,mode:examMode,
     pos,sec:sessSec,run,rw:roundWrong,ids:deck.map(c=>c.id),S:S.map(s=>Object.assign({},s,{open:{}}))}));
 }
 function clearCheckpoint(){try{localStorage.removeItem('mdcu_cur')}catch(e){}}
+const ckPairs=j=>j&&j.ids?j.ids.map((id,i)=>[Q.find(c=>c.id===id),j.S[i]]).filter(p=>p[0]&&p[1]&&p[1].ord&&p[1].ord.length===p[0].o.length):[];
 function readCheckpoint(){
   try{
     const j=JSON.parse(localStorage.getItem('mdcu_cur'));if(!j||!j.ids)return null;
-    const pairs=j.ids.map((id,i)=>[Q.find(c=>c.id===id),j.S[i]]).filter(p=>p[0]&&p[1]&&p[1].ord&&p[1].ord.length===p[0].o.length);
+    const pairs=ckPairs(j);
     return pairs.length?{j,pairs}:null;
   }catch(e){return null}
 }
@@ -1639,16 +1688,40 @@ function resumeCheckpoint(){
   examMode=j.mode||false;sessSec=j.sec||0;run=j.run||{n:0,c:0};roundWrong=j.rw||[];chapStreak={};
   view='quiz';render();scrollTop();return true;
 }
+/* keep what was answered in history (stats) before a checkpoint is parked or thrown away */
+function ckToHist(j,pairs){
+  if(!j.run||!j.run.n)return;
+  const r={id:j.id,start:j.start||j.id,end:j.at||Date.now(),title:j.title,sub:j.sub,mode:j.mode,n:pairs.length,ans:j.run.n,c:j.run.c,dur:j.sec||0,done:false,
+    items:pairs.map(([c,s])=>[c.id,s.scored?(s.ok?1:0):-1,s.qsec||0,s.hintUsed?1:0])};
+  const i=HIST.findIndex(h=>h.id===j.id);if(i>=0)HIST[i]=r;else HIST.push(r);
+  saveHist();
+}
 function discardCheckpoint(){
   const ck=readCheckpoint();
-  if(ck&&ck.j.run&&ck.j.run.n&&!HIST.some(h=>h.id===ck.j.id)){
-    // keep what was answered in history before throwing the session away
-    const {j,pairs}=ck;
-    HIST.push({id:j.id,start:j.start||j.id,end:Date.now(),title:j.title,sub:j.sub,mode:j.mode,n:pairs.length,ans:j.run.n,c:j.run.c,dur:j.sec||0,done:false,
-      items:pairs.map(([c,s])=>[c.id,s.scored?(s.ok?1:0):-1,s.qsec||0,s.hintUsed?1:0])});
-    saveHist();
-  }
+  if(ck)ckToHist(ck.j,ck.pairs);
   clearCheckpoint();
+}
+/* move the saved checkpoint to the parked list when something was answered and something is left */
+function parkCheckpoint(){
+  const ck=readCheckpoint();clearCheckpoint();
+  if(!ck)return;
+  const {j,pairs}=ck;ckToHist(j,pairs);
+  if(!(j.run&&j.run.n)||pairs.every(p=>p[1].scored))return;
+  PARKED=PARKED.filter(p=>p.id!==j.id);PARKED.push(j);saveParked();
+}
+function resumeParked(id){
+  const j=PARKED.find(p=>p.id===id);if(!j)return;
+  PARKED=PARKED.filter(p=>p.id!==id);saveParked();
+  clearTimeout(advTimer);
+  if(sessId&&pos<deck.length){archiveSession();saveCheckpoint(true)}
+  parkCheckpoint();
+  LS_set('mdcu_cur',JSON.stringify(j));sessId=0;
+  if(!resumeCheckpoint()){clearCheckpoint();toast('This set is no longer in the bank');render()}
+}
+function discardParked(id){
+  const j=PARKED.find(p=>p.id===id);if(!j)return;
+  ckToHist(j,ckPairs(j));
+  PARKED=PARKED.filter(p=>p.id!==id);saveParked();
 }
 function filterTitle(){
   const ch=$('chp').value,m=$('mode');
@@ -1661,8 +1734,10 @@ function runExam(){
 }
 function runExam78(){
   if(!sub){chooseSubj(r=>{sub=r;syncSeg();fillCh();runExam78()});return}
-  const p=shuf(Q.filter(c=>c.s===sub&&(c.hy>=2||c.tier===1)));
-  startDeck(lim()?p.slice(0,lim()):p,'High-Yield · '+SUB[sub],'Repeated across years / Tier 1','hy');
+  // unseen first, then last-wrong, then last-right, so repeating the set keeps moving through the pool
+  const P=Q.filter(c=>c.s===sub&&(c.hy>=2||c.tier===1));
+  const p=[...shuf(P.filter(c=>!attOf(c.id).length)),...shuf(P.filter(c=>attOf(c.id).length&&st[c.id]!=='o')),...shuf(P.filter(c=>attOf(c.id).length&&st[c.id]==='o'))];
+  startDeck(lim()?p.slice(0,lim()):p,'High-Yield · '+SUB[sub],'Repeated across years / Tier 1 · unseen first','hy');
 }
 function shuffleDeck(){
   if(!deck.length)return;
@@ -1674,6 +1749,31 @@ function retryWrong(){
   startDeck(ids.map(id=>Q.find(c=>c.id===id)).filter(Boolean),'Review mistakes',ids.length+' from this set');
 }
 function retryPool(){startDeck(shuf(Q.filter(c=>st[c.id]==='x')),'Review mistakes','From all history')}
+/* spaced review: a question you got wrong comes back 1, 3, 7, then 21 days after your last answer.
+   Each correct answer in a row moves it to the next gap, a wrong answer starts it over; after 4 in a row it leaves the queue.
+   Worked out from ATT (last 12 attempts), so nothing extra is stored. */
+const SRS_GAPS=[1,3,7,21];
+const dayNo=t=>{const d=new Date(t);return Math.floor((t-d.getTimezoneOffset()*6e4)/DAY)};
+function srsOf(id){
+  const a=ATT[id];if(!a||!a.length)return null;
+  let w=-1;for(let i=a.length-1;i>=0;i--)if(!a[i][1]){w=i;break}
+  if(w<0)return null;
+  const box=a.length-1-w;if(box>=SRS_GAPS.length)return null;
+  const last=a[a.length-1][0];
+  return {box,due:last?dayNo(last)+SRS_GAPS[box]:0};
+}
+function srsQueue(){
+  const today=dayNo(Date.now()),due=[],later=[];
+  Q.forEach(c=>{const r=srsOf(c.id);if(!r)return;(r.due<=today?due:later).push({c,r})});
+  due.sort((a,b)=>a.r.due-b.r.due||a.r.box-b.r.box);later.sort((a,b)=>a.r.due-b.r.due);
+  return {today,due,later,next:later.length?later[0].r.due-today:null};
+}
+function runDue(){
+  const q=srsQueue();
+  if(!q.due.length){toast(q.next?'Nothing due today · next review in '+q.next+' day'+(q.next>1?'s':''):'Nothing to review yet');return}
+  // most overdue first, 30 at a time; choices are reshuffled as usual
+  startDeck(q.due.slice(0,30).map(x=>x.c),'Due review',q.due.length+' due · spaced 1 / 3 / 7 / 21 days');
+}
 
 /* ---- adaptive injection: 2 wrong in a row in a chapter ---- */
 function bump(c,ok){
@@ -2003,24 +2103,48 @@ function goHome(){clearTimeout(advTimer);saveCheckpoint(true);view='home';closeS
 function renderHome(){
   const O=overall(),ck=readCheckpoint(),recs=recommendations();
   const pool=Q.filter(c=>st[c.id]==='x').length,unseenQ=Q.filter(c=>!attOf(c.id).length);
-  const hyN=s=>Q.filter(c=>c.s===s&&(c.hy>=2||c.tier===1)).length;
-  const tile=(id,ic,t,s,cls)=>'<button class="qc'+(cls?' '+cls:'')+'" id="'+id+'"><span class="qic">'+ic+'</span>'
-    +'<span class="qtx"><span class="qt">'+t+'</span><span class="qsub">'+s+'</span></span><span class="qgo">→</span></button>';
+  const hyQ=s=>Q.filter(c=>c.s===s&&(c.hy>=2||c.tier===1));
+  // unfinished sets: the open one first, then parked ones (newest first)
+  const conts=[];
+  if(ck)conts.push({cur:true,j:ck.j,n:ck.pairs.length});
+  PARKED.forEach(j=>{if(ck&&j.id===ck.j.id)return;const n=ckPairs(j).length;if(n)conts.push({j,n})});
+  const openSet=t=>conts.find(x=>x.j.title===t);
+  // prog: [done,total] draws a bar and a ✓ when complete; badge: small pill after the title
+  const tile=(id,ic,t,s,cls,prog,badge)=>{
+    const full=prog&&prog[1]&&prog[0]>=prog[1];
+    return '<button class="qc'+(cls?' '+cls:'')+(full?' full':'')+'" id="'+id+'"><span class="qic">'+(full?'✓':ic)+'</span>'
+    +'<span class="qtx"><span class="qt">'+t+(badge?'<span class="qbadge">'+badge+'</span>':'')+'</span><span class="qsub">'+s+'</span>'
+    +(prog&&prog[1]?'<span class="qbar"><i style="width:'+pct(prog[0],prog[1])+'%"></i></span>':'')+'</span><span class="qgo">→</span></button>'};
   let h='<div class="home"><div class="hero"><h1>AC</h1><p>'+SUBS.map(s=>SUB[s]).join(' · ')+' · '+Q.length+' questions · MDCU 65–78</p></div>';
-  if(ck){
-    const j=ck.j,n=ck.pairs.length,a=j.run?j.run.n:0,c=j.run?j.run.c:0;
-    h+='<div class="resume"><div class="rs-l"><div class="eyebrow">Continue · '+fmtDate(j.start||j.id)+'</div>'
+  if(conts.length){
+    const meta=x=>{const j=x.j,a=j.run?j.run.n:0,c=j.run?j.run.c:0;
+      return 'Q'+Math.min((j.pos||0)+1,x.n)+' of '+x.n+' · '+a+' answered'+(a?' · '+pct(c,a)+'% correct':'')+' · '+fmtDur(j.sec)};
+    const x=conts[0],j=x.j,a=j.run?j.run.n:0;
+    h+='<div class="resume"><div class="rs-l"><div class="eyebrow">Continue · '+fmtDate(j.at||j.start||j.id)+'</div>'
       +'<div class="rs-t">'+E(j.title||'Last set')+'</div>'
-      +'<div class="rs-m">Q'+Math.min((j.pos||0)+1,n)+' of '+n+' · '+a+' answered'+(a?' · '+pct(c,a)+'% correct':'')+' · '+fmtDur(j.sec)+'</div>'
-      +'<div class="rs-bar"><i style="width:'+pct(a,n)+'%"></i></div></div>'
-      +'<div class="rs-b"><button class="btn primary" id="hResume">Resume →</button><button class="btn ghost" id="hDiscard">Discard</button></div></div>';
+      +'<div class="rs-m">'+meta(x)+'</div>'
+      +'<div class="rs-bar"><i style="width:'+pct(a,x.n)+'%"></i></div></div>'
+      +'<div class="rs-b"><button class="btn primary" data-resume="'+j.id+'">Resume →</button><button class="btn ghost" data-discard="'+j.id+'">Discard</button></div></div>';
+    if(conts.length>1){
+      h+='<div class="sec-h">Unfinished sets<span>'+(conts.length-1)+' more · pick up any of them</span></div><div class="parked">';
+      conts.slice(1).forEach(x=>{const j=x.j,a=j.run?j.run.n:0;
+        h+='<div class="pk"><button class="pk-go" data-resume="'+j.id+'"><span class="pk-t">'+E(j.title||'Set')+'<small>'+(j.sub?E(j.sub)+' · ':'')+fmtDate(j.at||j.start||j.id)+'</small></span>'
+          +'<span class="pk-m">'+meta(x)+'</span><span class="rs-bar"><i style="width:'+pct(a,x.n)+'%"></i></span></button>'
+          +'<button class="pk-x" data-discard="'+j.id+'" title="Discard" aria-label="Discard this set">✕</button></div>'});
+      h+='</div>';
+    }
   }
+  const busy=conts.length>0,srs=srsQueue(),dueN=srs.due.length;
+  const dueSub=dueN?dueN+' due'+(srs.later.length?' · '+srs.later.length+' scheduled':''):'Nothing due · next in '+srs.next+' day'+(srs.next>1?'s':'');
   // Start: the main way in, big and first
   h+='<div class="sec-h">Start</div><div class="qs">'
-    +(pool?tile('hPool','↻','Review mistakes',pool+' still wrong',ck?'':'pri'):'')
+    +(dueN||srs.later.length?tile('hDue','⏱','Due today',dueSub,dueN&&!busy?'pri':''):'')
+    +(pool?tile('hPool','↻','Review mistakes',pool+' still wrong',busy||dueN?'':'pri'):'')
     +(pool?tile('hCards','⧉','Flashcards',pool+' mistakes · swipe to review'):'')
-    +SUBS.map((s,i)=>tile('hHy'+s,'★','High-Yield '+SUB[s],hyN(s)+' questions',!i&&!ck&&!pool?'pri':'')).join('')
-    +(unseenQ.length?tile('hUnseen','○','Unseen','20 of '+unseenQ.length+' remaining'):'')
+    +SUBS.map((s,i)=>{const A=aggregate(hyQ(s)),o=openSet('High-Yield · '+SUB[s]);
+      const txt=!A.seen?A.total+' questions · not started':A.seen>=A.total?'All '+A.total+' done · '+accTxt(A.acc):A.seen+' of '+A.total+' done · '+accTxt(A.acc);
+      return tile('hHy'+s,'★','High-Yield '+SUB[s],txt,!i&&!busy&&!pool?'pri':'',[A.seen,A.total],o?'In progress':'')}).join('')
+    +(unseenQ.length?tile('hUnseen','○','Unseen','20 of '+unseenQ.length+' remaining','',[Q.length-unseenQ.length,Q.length]):'')
     +tile('hRand','⤮','Random 20','All subjects')
     +tile('hNew','＋','Custom set','Subject · chapter · filters')+'</div>';
   h+='<div class="kpis">'+kpi('Seen',O.seen+'<small>/'+Q.length+'</small>',pct(O.seen,Q.length)+'% of bank')
@@ -2040,7 +2164,7 @@ function renderHome(){
     h+='<details class="subj"><summary><span class="sn">'+SUB[s]+'</span>'+statBar(A.o,A.x,A.total)
       +'<span class="sm">'+A.seen+'/'+A.total+' · '+accTxt(A.acc)+'</span></summary><div class="chl">';
     CHAPS.forEach((C,i)=>{if(C.s!==s)return;const a=aggregate(C.qs);
-      h+='<button class="chr" data-ch="'+i+'"><span class="cn">'+E(chName(C.k))+'</span>'+statBar(a.o,a.x,a.total)
+      h+='<button class="chr'+(a.seen>=a.total?' full':'')+'" data-ch="'+i+'"><span class="cn">'+(a.seen>=a.total?'<b class="ck">✓</b>':'')+E(chName(C.k))+'</span>'+statBar(a.o,a.x,a.total)
         +'<span class="cm">'+a.seen+'/'+a.total+(a.acc==null?'':' · <b class="'+accCls(a.acc,a.n)+'">'+accTxt(a.acc)+'</b>')+'</span></button>'});
     h+='</div></details>';
   });
@@ -2050,11 +2174,18 @@ function renderHome(){
   $('wrap').innerHTML=h;
   const on=(id,f)=>{const b=$(id);if(b)b.onclick=f};
   wireHeatmap();
-  on('hResume',resumeCheckpoint);
-  on('hDiscard',async()=>{if(await ask('Discard the unfinished set?\nAnswers so far stay in your stats.','Discard set')){discardCheckpoint();sessId=0;deck=[];S=[];render()}});
-  on('hNew',()=>openSheet('newScrim'));on('hPool',retryPool);on('hCards',()=>startCards());
+  $('wrap').querySelectorAll('[data-resume]').forEach(b=>b.onclick=()=>{const id=+b.dataset.resume;if(ck&&ck.j.id===id)resumeCheckpoint();else resumeParked(id)});
+  $('wrap').querySelectorAll('[data-discard]').forEach(b=>b.onclick=async()=>{
+    const id=+b.dataset.discard;
+    if(!await ask('Discard this unfinished set?\nAnswers so far stay in your stats.','Discard set'))return;
+    if(ck&&ck.j.id===id){discardCheckpoint();sessId=0;deck=[];S=[]}else discardParked(id);
+    render()});
+  on('hNew',()=>openSheet('newScrim'));on('hPool',retryPool);on('hCards',()=>startCards());on('hDue',runDue);
   on('hUnseen',()=>startDeck(shuf(unseenQ.slice()).slice(0,20),'Unseen','20 random'));
-  SUBS.forEach(s=>on('hHy'+s,()=>{sub=s;syncSeg();runExam78()}));
+  // a High-Yield set that is still open picks up where it stopped instead of starting over
+  SUBS.forEach(s=>on('hHy'+s,()=>{const o=openSet('High-Yield · '+SUB[s]);
+    if(o){if(o.cur)resumeCheckpoint();else resumeParked(o.j.id);return}
+    sub=s;syncSeg();runExam78()}));
   on('hRand',()=>startDeck(shuf(Q.slice()).slice(0,20),'Random 20','All subjects'));
   on('hAllSess',()=>openStats('sess'));
   $('wrap').querySelectorAll('[data-rec]').forEach(b=>b.onclick=()=>recs[+b.dataset.rec].run());
@@ -2315,14 +2446,14 @@ function syncSeg(){document.querySelectorAll('#subSeg button').forEach(b=>b.setA
 document.querySelectorAll('#subSeg button').forEach(b=>b.onclick=()=>{sub=b.dataset.sub;syncSeg();$('chp').value='';fillCh()});
 $('chp').onchange=fillCh;$('mode').onchange=fillCh;$('cnt').onchange=fillCh;
 $('goBtn').onclick=build;$('ex78').onclick=runExam78;$('ex').onclick=runExam;$('sh').onclick=shuffleDeck;
-const DATA_KEYS=['mdcu_stats','mdcu_flags','mdcu_att','mdcu_hist','mdcu_cur',KEY];
+const DATA_KEYS=['mdcu_stats','mdcu_flags','mdcu_att','mdcu_hist','mdcu_cur','mdcu_parked',KEY];
 function loadData(){
   const j=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))||d}catch(e){return d}};
-  st=j(KEY,{});LS=j('mdcu_stats',{n:0,c:0});flags=j('mdcu_flags',{});ATT=j('mdcu_att',{});HIST=j('mdcu_hist',[]);
+  st=j(KEY,{});LS=j('mdcu_stats',{n:0,c:0});flags=j('mdcu_flags',{});ATT=j('mdcu_att',{});HIST=j('mdcu_hist',[]);PARKED=j('mdcu_parked',[]);
 }
 function resetAll(){
   const snap={};DATA_KEYS.forEach(k=>{snap[k]=LS_get(k,null)});
-  st={};LS={n:0,c:0};flags={};ATT={};HIST=[];sessId=0;deck=[];S=[];run={n:0,c:0};roundWrong=[];
+  st={};LS={n:0,c:0};flags={};ATT={};HIST=[];PARKED=[];sessId=0;deck=[];S=[];run={n:0,c:0};roundWrong=[];
   DATA_KEYS.forEach(k=>{try{localStorage.removeItem(k)}catch(e){}});
   sub='';syncSeg();$('mode').value='all';$('chp').value='';fillCh();
   hmSnap=null;view='home';render();scrollTop();
@@ -2421,6 +2552,7 @@ function cmdActions(){
   A.push({g:'Start',ic:'＋',t:'New set…',s:'Subject, chapter, filters, size',run:()=>openSheet('newScrim')});
   A.push({g:'Start',ic:'🔥',t:'High-Yield set',s:'Repeated across years / Tier 1',run:runExam78});
   A.push({g:'Start',ic:'🎲',t:'Mock exam',s:'Random from current filters',run:runExam});
+  A.push({g:'Start',ic:'⏱',t:'Due review',s:'Spaced repetition · mistakes back after 1 / 3 / 7 / 21 days',run:runDue});
   A.push({g:'Start',ic:'↻',t:'Review mistakes',s:'From all history',run:retryPool});
   A.push({g:'Start',ic:'⧉',t:'Flashcards',s:'Swipe through open mistakes',run:()=>startCards()});
   A.push({g:'Subject',ic:'∀',t:'All subjects',s:'',run:()=>setSub('')});
@@ -2738,6 +2870,7 @@ function wireCardDrag(el){
 /* ---- boot ---- */
 syncSeg();fillCh();view='home';render();
 if(window._bankMsg)setTimeout(()=>toast(window._bankMsg),600);
+if(window._fixMsg)setTimeout(()=>toast(window._fixMsg),900);
 </script>
 <script type="text/plain" id="bank-parser">
 # Parse markdown question banks into a JS data array.
